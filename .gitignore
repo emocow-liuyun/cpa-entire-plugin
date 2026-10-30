@@ -43,6 +43,7 @@ __pycache__/
 /verify_model_list.py
 /oauth-notes.md
 /scan_staged.py
+/inspect_oauth_result.py
 
 # Local credentials, OAuth material, and secrets
 oauth/

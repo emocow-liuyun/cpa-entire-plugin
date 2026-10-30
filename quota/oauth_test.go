@@ -413,18 +413,15 @@ func TestLoginStartUsesOfficialDeviceFlow(t *testing.T) {
 	if call.URL != "https://us.auth.entire.io/device_authorization" {
 		t.Fatalf("url = %s", call.URL)
 	}
-	if got := call.Headers.Get("Content-Type"); !strings.Contains(got, "application/json") {
+	if got := call.Headers.Get("Content-Type"); !strings.Contains(got, "application/x-www-form-urlencoded") {
 		t.Fatalf("Content-Type = %q", got)
 	}
-	var sent deviceAuthorizationRequest
-	if errUnmarshal := json.Unmarshal([]byte(call.Body), &sent); errUnmarshal != nil {
-		t.Fatalf("decode device authorization body: %v", errUnmarshal)
+	sent, errForm := url.ParseQuery(call.Body)
+	if errForm != nil {
+		t.Fatal(errForm)
 	}
-	if sent.ClientID != "entire-cli" {
-		t.Fatalf("client_id = %q, want entire-cli", sent.ClientID)
-	}
-	if sent.Scope != "cli offline_access" {
-		t.Fatalf("scope = %q, want cli offline_access", sent.Scope)
+	if sent.Get("client_id") != "entire-cli" || sent.Get("scope") != "cli offline_access" {
+		t.Fatalf("unexpected device form: %v", sent)
 	}
 
 	if start.Provider != entireAuthIdentifier {
@@ -574,8 +571,8 @@ func TestLoginPollPendingThenSuccess(t *testing.T) {
 	if success.Auth.Provider != entireAuthIdentifier {
 		t.Fatalf("auth provider = %q", success.Auth.Provider)
 	}
-	// The label must describe the login server, never a handle or a token.
-	if success.Auth.Label != "us.auth.entire.io" {
+	// The label identifies the account using a non-secret digest.
+	if !strings.HasPrefix(success.Auth.Label, "Entire ") {
 		t.Fatalf("label = %q", success.Auth.Label)
 	}
 	if strings.Contains(success.Auth.FileName, fixtureAccessToken) ||

@@ -34,6 +34,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -975,18 +976,8 @@ func handleAuthLoginStart(raw []byte) ([]byte, *pluginError) {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultPollTimeout)
 	defer cancel()
 
-	body, errMarshal := json.Marshal(deviceAuthorizationRequest{
-		ClientID: entireDeviceClientID,
-		Scope:    entireDeviceScope,
-	})
-	if errMarshal != nil {
-		return nil, newPluginError(codePluginError, "encode device authorization request failed", 0)
-	}
-	headers := http.Header{
-		"Accept":       []string{"application/json"},
-		"Content-Type": []string{"application/json"},
-		"User-Agent":   []string{"CPA-Entire-Auth/" + pluginVersion},
-	}
+	body := []byte(url.Values{"client_id": {entireDeviceClientID}, "scope": {entireDeviceScope}}.Encode())
+	headers := formHeaders()
 	status, _, rawBody, errDo := client.Do(ctx, http.MethodPost, buildDeviceAuthorizationURL(authBase), headers, body)
 	if errDo != nil {
 		return nil, asAuthPluginError(errDo, "requesting the Entire device code failed")
@@ -1254,6 +1245,25 @@ func pollSuccess(state string, flow *deviceFlow, doc tokenResponse) ([]byte, *pl
 	authFlows.drop(state)
 
 	auth := buildAuthData(stored, hostSummary{}, flow.Label)
+	// Identity claims select a filename, never grant authorization.
+	// The token itself was obtained from the TLS-authenticated token endpoint.
+	identity := stored.token
+	parts := strings.Split(stored.token, ".")
+	if len(parts) == 3 {
+		if payload, err := base64.RawURLEncoding.DecodeString(parts[1]); err == nil {
+			var claims struct {
+				Subject string `json:"sub"`
+				Issuer  string `json:"iss"`
+			}
+			if json.Unmarshal(payload, &claims) == nil && claims.Subject != "" {
+				identity = claims.Issuer + "\x00" + claims.Subject
+			}
+		}
+	}
+	digest := sha256.Sum256([]byte(identity))
+	auth.FileName = "entire-" + hex.EncodeToString(digest[:12]) + ".json"
+	auth.ID = ""
+	auth.Label = "Entire " + hex.EncodeToString(digest[:4])
 	emitHostLog("info", "entire-auth: login completed", map[string]any{
 		"provider":     entireAuthIdentifier,
 		"has_refresh":  stored.refresh != "",
