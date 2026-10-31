@@ -28,6 +28,10 @@ type pluginConfig struct {
 	TimeoutSeconds int `yaml:"timeout-seconds"`
 	// OrgID switches the fetch target from /me/billing to /orgs/{org_id}/billing.
 	OrgID string `yaml:"org-id"`
+	// AutoRenew enables the automatic credential renewal that quota.fetch runs
+	// when the stored access token is expired or the control plane answers 401.
+	// Default true.
+	AutoRenew *bool `yaml:"auto-renew"`
 }
 
 // runtimeConfig is the normalized, validated configuration.
@@ -41,6 +45,7 @@ type runtimeConfig struct {
 	RequireTopUpOnFailure bool
 	TimeoutSeconds        int
 	OrgID                 string
+	AutoRenew             *bool
 }
 
 const (
@@ -105,6 +110,7 @@ func parseConfig(raw []byte) (runtimeConfig, error) {
 		RequireTopUpOnFailure: requireTopUp,
 		TimeoutSeconds:        timeout,
 		OrgID:                 strings.TrimSpace(parsed.OrgID),
+		AutoRenew:             parsed.AutoRenew,
 	}, errParse
 }
 

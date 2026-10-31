@@ -60,6 +60,7 @@ static void entire_free_host_buffer(void* ptr, size_t len) {
 import "C"
 
 import (
+	"context"
 	"encoding/json"
 	"unsafe"
 )
@@ -137,6 +138,18 @@ func writeResponse(response *C.cliproxy_buffer, raw []byte) {
 // callHost invokes one host RPC and returns the plugin-facing error, if any.
 // The host envelope is unwrapped so callers see the plain result payload.
 func callHost(method string, payload []byte) (json.RawMessage, error) {
+	return callHostCtx(context.Background(), method, payload)
+}
+
+// callHostCtx is callHost with an explicit caller context. The C ABI itself is
+// context-free; the context only lets a caller stop before crossing into the
+// host once it has already been cancelled (renewal under a lock, for example).
+func callHostCtx(ctx context.Context, method string, payload []byte) (json.RawMessage, error) {
+	if ctx != nil {
+		if errCtx := ctx.Err(); errCtx != nil {
+			return nil, newPluginError(codeHostCallFailed, "host callback "+method+" cancelled", 0)
+		}
+	}
 	if C.entire_host_api_available() == 0 {
 		return nil, newPluginError(codeHostUnavailable, "host callback API is not available", 0)
 	}

@@ -116,6 +116,10 @@ type lifecycleRequest struct {
 type quotaFetchRequest struct {
 	quotaFetchContext
 	HostCallbackID string `json:"host_callback_id,omitempty"`
+	// AuthFileName is the auth file the credential came from. The host does not
+	// send it (pluginapi.QuotaFetchRequest has no such field); it is filled from
+	// host.auth.get, and only an explicit value is trusted for a save target.
+	AuthFileName string `json:"auth_file_name,omitempty"`
 }
 
 // quotaResetRequest is the host payload for quota.reset.
@@ -190,6 +194,7 @@ func registrationConfigFields() []registrationConfigField {
 		{Name: "org-id", Type: "string", Description: "Optional organization ULID; switches the read from /me/billing to /orgs/{org_id}/billing."},
 		{Name: "require-top-up-on-failure", Type: "boolean", Default: true, Description: "Fail closed when an automatic top-up block is missing, unreadable or failed."},
 		{Name: "timeout-seconds", Type: "integer", Default: defaultTimeoutSecond, Description: "Per-call timeout in seconds (1-60)."},
+		{Name: "auto-renew", Type: "boolean", Default: true, Description: "Renew an expired credential once through its refresh_token before reporting a quota failure."},
 	}
 }
 
@@ -332,28 +337,18 @@ func handleFetch(rawRequest []byte) ([]byte, *pluginError) {
 	}
 
 	ctx := context.Background()
-	cred, errCredential := resolveCredential(ctx, cfg, req.quotaFetchContext)
-	if errCredential != nil {
-		var plugErr *pluginError
-		if asPluginError(errCredential, &plugErr) {
-			return nil, plugErr
-		}
-		return nil, newPluginError(codeMissingCredential, errCredential.Error(), 0)
-	}
-
-	status, _, errRead := readBilling(ctx, cfg, cred, billingTransport(req.HostCallbackID))
+	// fetchWithRenewal owns credential resolution, the billing read and the
+	// single automatic renewal: an expired credential is rotated under the
+	// account lock before the failure can reach the operator.
+	status, cred, errRead := fetchWithRenewal(ctx, cfg, req, req.HostCallbackID)
 	if errRead != nil {
-		var plugErr *pluginError
-		if asPluginError(errRead, &plugErr) {
-			emitHostLog("warn", "entire-quota: billing read failed for provider "+req.Provider, map[string]any{
-				"code":      plugErr.Code,
-				"auth_id":   req.AuthID,
-				"auth_idx":  req.AuthIndex,
-				"token_src": string(cred.Source),
-			})
-			return nil, plugErr
-		}
-		return nil, newPluginError(codePluginError, errRead.Error(), 0)
+		emitHostLog("warn", "entire-quota: billing read failed for provider "+req.Provider, map[string]any{
+			"code":      errRead.Code,
+			"auth_id":   req.AuthID,
+			"auth_idx":  req.AuthIndex,
+			"token_src": string(cred.Source),
+		})
+		return nil, errRead
 	}
 
 	response, errMap := evaluateQuota(quotaEvaluation{

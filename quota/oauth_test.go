@@ -1109,8 +1109,16 @@ func TestAuthRefreshRejectionIsReported(t *testing.T) {
 	if errRefresh == nil {
 		t.Fatalf("a rejected refresh must fail, got %s", raw)
 	}
-	if errRefresh.Code != codeAuthTokenUnavailable {
-		t.Fatalf("code = %s, want %s", errRefresh.Code, codeAuthTokenUnavailable)
+	// A dead refresh token is a sign-in problem: the code says so explicitly
+	// and the message tells the operator what to do.
+	if errRefresh.Code != codeAuthReloginRequired {
+		t.Fatalf("code = %s, want %s", errRefresh.Code, codeAuthReloginRequired)
+	}
+	if errRefresh.HTTPStatus != http.StatusUnauthorized {
+		t.Fatalf("http status = %d, want 401", errRefresh.HTTPStatus)
+	}
+	if !strings.Contains(errRefresh.Message, "sign in again") {
+		t.Fatalf("message must instruct a sign-in: %q", errRefresh.Message)
 	}
 	if strings.Contains(errRefresh.Message, fixtureRefreshToken) {
 		t.Fatal("refresh token leaked into the error message")

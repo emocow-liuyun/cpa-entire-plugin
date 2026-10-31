@@ -44,6 +44,11 @@ __pycache__/
 /oauth-notes.md
 /scan_staged.py
 /inspect_oauth_result.py
+/check_expiry.py
+/check_expiry_compare.py
+/inspect_local_auth_state.py
+/verify_latest_entire.py
+/repair_expired_entire.py
 
 # Local credentials, OAuth material, and secrets
 oauth/

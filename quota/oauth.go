@@ -1288,6 +1288,25 @@ func handleAuthRefresh(raw []byte) ([]byte, *pluginError) {
 			return nil, newPluginError(codeInvalidRequest, "auth.refresh payload is not valid JSON", 0)
 		}
 	}
+	// Host-driven refresh and quota.fetch renewal share one account lock: the
+	// refresh token is single-use, so two concurrent grants would spend the same
+	// value and the loser would rotate onto a dead token.
+	unlock, okLock := renewLocksForAuth(req)
+	if !okLock {
+		return nil, newPluginError(codeAuthRenewLocked,
+			"another refresh for this Entire credential is still running; retry shortly", http.StatusTooManyRequests)
+	}
+	defer unlock()
+	return refreshAuthLocked(req)
+}
+
+// renewLocksForAuth takes the account lock for one auth.refresh request.
+func renewLocksForAuth(req authRefreshRequest) (func(), bool) {
+	return renewLocks.acquire(credentialLockKey(req.AuthID, ""), authLockTimeout)
+}
+
+// refreshAuthLocked is handleAuthRefresh with the account lock already held.
+func refreshAuthLocked(req authRefreshRequest) ([]byte, *pluginError) {
 	provider := normalizeProviderID(req.AuthProvider)
 	if provider != "" && provider != entireAuthIdentifier {
 		return nil, newPluginError(codeUnknownMethod,
@@ -1337,7 +1356,12 @@ func handleAuthRefresh(raw []byte) ([]byte, *pluginError) {
 			"error":    errCode,
 			"auth_id":  req.AuthID,
 		})
-		if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		switch {
+		case errCode == "invalid_grant" || errCode == "unauthorized_client" || errCode == "invalid_client":
+			// A dead refresh token is a sign-in problem, not a transport problem.
+			// The message names the action and never the secret.
+			return nil, newPluginError(codeAuthReloginRequired, reloginMessage, http.StatusUnauthorized)
+		case status == http.StatusUnauthorized || status == http.StatusForbidden:
 			return nil, newPluginError(codeUnauthenticated,
 				"Entire rejected the refresh token; sign in again (HTTP "+fmt.Sprint(status)+")", status)
 		}
@@ -1374,6 +1398,13 @@ func handleAuthRefresh(raw []byte) ([]byte, *pluginError) {
 	if strings.TrimSpace(req.AuthID) != "" {
 		auth.ID = strings.TrimSpace(req.AuthID)
 	}
+	// A refresh must never rename the credential. The host keeps the file it is
+	// already reading (cpa-source internal/pluginhost/auth_provider.go
+	// RefreshAuth only substitutes FileName when the plugin leaves it empty), so
+	// an empty name here means "keep the current one" instead of a new download
+	// name, a lost prefix or a second file for the same account.
+	auth.FileName = ""
+	auth.Prefix = ""
 	next := refreshAfter(updated.expiresAt)
 	return encodeOKEnvelope(authRefreshResponse{
 		Auth:             auth,

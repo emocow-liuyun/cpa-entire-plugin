@@ -47,12 +47,24 @@ void cliproxyPluginShutdown(void);
 | `quota.fetch` | `QuotaFetchRequest` + `host_callback_id` | `QuotaFetchResponse` | `internal/pluginhost/rpc_client.go:717` |
 | `quota.reset` | `QuotaResetRequest` + `host_callback_id` | `{success:false, message}` | `internal/pluginhost/rpc_client.go:726` |
 
-插件 → 宿主（本插件只调用这两条）：
+插件 → 宿主：
 
-| 方法 | 请求 | 结果 |
-| --- | --- | --- |
-| `host.http.do` | `{host_callback_id, method, url, headers, body}` | `{StatusCode, Headers, Body}` |
-| `host.log` | `{level, message, fields}` | `{}` |
+| 方法 | 请求 | 结果 | 用途 |
+| --- | --- | --- | --- |
+| `host.http.do` | `{host_callback_id, method, url, headers, body}` | `{StatusCode, Headers, Body}` | 账单读取、token 端点 |
+| `host.log` | `{level, message, fields}` | `{}` | 结构化日志（已脱敏） |
+| `host.auth.get` | `{"auth_index": "..."}` | `{auth_index, name, path, json}` | 自动续期前重读 auth 文件 |
+| `host.auth.save` | `{"name": "....json", "json": {...}}` | `{name, path}` | 通过宿主保存轮换后的 token（落盘原子性取决于宿主实现） |
+
+`host.auth.get` / `host.auth.save` 的契约来自 `internal/pluginhost/auth_callbacks.go`：
+
+- `host.auth.get` 按 `auth_index` 找到 auth 记录，再按 `attributes["path"]` 读**磁盘原文**，
+  返回的 `json` 是文件原始字节（base64）。它不是内存里的 metadata，而是真正落盘的那份。
+- `host.auth.save` 只接受 `{name, json}` 两个字段（`pluginapi.HostAuthSaveRequest`），
+  `name` 必须是不含 `/`、`\` 的 `.json` 文件名；宿主先把内容解析成 auth 记录，再用
+  `os.WriteFile` 写回同一路径（`saveAuthFile`）。文件名不能带路径，也不能改名。
+- 因此本插件的写回**沿用原文件名**：改名会让宿主 auth manager 里的 ID、priority、prefix
+  与操作员的配置脱钩，相当于同一账号多出一份凭证。
 
 关键细节（已在源码核对）：
 
@@ -77,6 +89,7 @@ plugins:
       allow-domains: ["entire.io", "console.entire.io", "us.console.entire.io", "api.entire.io"]
       require-top-up-on-failure: true
       timeout-seconds: 15
+      auto-renew: true      # 过期 / 401 时自动用 refresh_token 续期（默认 true）
       # org-id: "01JABCDEFGHJKMNPQRSTVWXYZ"   # 可选：改读 /orgs/{org_id}/billing
 ```
 
@@ -160,6 +173,52 @@ plugins:
 
 插件内部错误标记：上游 `401` → `entire_unauthenticated`；`403` → `entire_forbidden`；管理 API 在部分宿主版本会统一返回 HTTP 502。宿主回调使用请求上下文，本插件的 `timeout-seconds` 尚未通过宿主回调强制执行。
 `421` 及其他非 2xx → `entire_upstream_status`；非 JSON / schema 不符 / 空 body → `entire_upstream_malformed`。
+
+## 自动续期（`renew.go`）
+
+`quota.fetch` 发现凭证过期（本地 `expires_at` 或 JWT `exp` 已过）或账单返回 `401` 时，
+按以下顺序续期一次：
+
+1. 取**每凭证账号锁**（`renewLocks`，key = `auth_id`，缺失时退化为 `auth_index`）。
+   `auth.refresh`（宿主侧刷新）与 `quota.fetch` 续期共用这把锁，避免一次性 refresh token 被花两次。
+2. 锁内用 `host.auth.get` 重读**磁盘上的** auth 文件。旋转型 refresh token 意味着
+   旧副本已被消费，所以重读失败时直接终止，不回退到请求里的旧 payload。
+3. 走 `refresh_token` grant（复用 `oauth.go` 的 `refreshAuthLocked`，它在锁内被直接调用，
+   不会再取锁）。
+4. 用 `host.auth.save` 写回（已检查的宿主源码使用 `os.WriteFile`，不宣称掉电原子性）：沿用原文件名；`prefix`、`disabled`、`priority`、`weight`、
+   `proxy_url`、`note`、`label`、未知扩展字段全部原样保留；只替换
+   `entire_token` / `access_token` / `refresh_token` / `expires_at` 等 token 字段。
+5. 用新 access token 重试账单读取，**最多 1 次**。
+
+错误语义：
+
+| 错误码 | 含义 | 是否重试 |
+| --- | --- | --- |
+| `entire_auth_relogin_required` | refresh token 已失效（`invalid_grant` 等），必须重新登录 | 否 |
+| `entire_auth_renew_transport` | 续期过程中的网络错误，令牌未被改动 | 否（网络错误反复 refresh 会烧掉 token） |
+| `entire_auth_renew_host_failure` | `host.auth.get` / `host.auth.save` 失败 | 否 |
+| `entire_auth_renew_locked` | 拿不到账号锁（已有续期在跑） | 否 |
+| `entire_auth_renew_no_grant` | 凭证根本没有 refresh token，续期结构性不可行 | 否 |
+
+任何错误信息都经过 `redact.go` 脱敏，access token / refresh token 不会出现在错误、日志或结果里。
+
+### 过期判定的根因
+
+宿主自身只用 `expires_at` 安排自动刷新：
+
+```go
+// cpa-source sdk/cliproxy/auth/types.go
+var expireKeys = [...]string{"expired", "expire", "expires_at", "expiresAt", "expiry", "expires"}
+```
+
+而 `ExpirationTime()` 优先读 JWT `exp`，**读不到**才回落到 `expireKeys`（`OuterExpirationTime`）。
+两边读的字段不同，于是会出现两组都会导致静默 401 的不一致：
+
+- 磁盘 `expires_at` 还在未来、JWT `exp` 已过 → 宿主的刷新排程被推迟到 401 窗口之后；
+- JWT `exp` 还在未来、磁盘 `expires_at` 已过 → 字段被人为改动或截断时同理。
+
+`inspectAuthExpiry` 因此**两个都读、取更早的那个**，这是唯一不会误判"仍然有效"的判据。
+修复写回时总把新的 `expires_at`（unix 秒）写回文件，让宿主的刷新排程重新对齐真实 token 寿命。
 
 ## 构建
 
