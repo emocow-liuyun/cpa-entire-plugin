@@ -784,6 +784,9 @@ func fetchWithRenewal(ctx context.Context, cfg runtimeConfig, req quotaFetchRequ
 			}
 			return billingStatus{}, credential{}, newPluginError(codeMissingCredential, errCredential.Error(), 0)
 		}
+		if outcome.err != nil {
+			return billingStatus{}, credential{}, outcome.err
+		}
 		cred = outcome.credential
 	}
 

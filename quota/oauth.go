@@ -827,6 +827,24 @@ func handleAuthParse(raw []byte) ([]byte, *pluginError) {
 		registerSecret(stored.refresh)
 	}
 	auth := buildAuthData(stored, req.Host, stored.label)
+	// Preserve operator-owned fields instead of resetting them during parsing.
+	var original map[string]any
+	if json.Unmarshal(req.RawJSON, &original) == nil {
+		auth.StorageJSON = append([]byte(nil), req.RawJSON...)
+		auth.Metadata = original
+		if value, ok := original["disabled"].(bool); ok {
+			auth.Disabled = value
+		}
+		if value, ok := original["prefix"].(string); ok {
+			auth.Prefix = value
+		}
+		if value, ok := original["proxy_url"].(string); ok {
+			auth.ProxyURL = value
+		}
+		if value, ok := original["label"].(string); ok {
+			auth.Label = value
+		}
+	}
 	auth.ID = stored.authID
 	if auth.ID == "" {
 		auth.FileName = strings.TrimSpace(req.FileName)
