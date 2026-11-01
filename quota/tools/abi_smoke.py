@@ -159,7 +159,7 @@ def main(argv):
     )
     results.append(("plugin.register", rc, env))
     assert env["ok"], env
-    assert env["result"]["capabilities"] == {"quota_provider": True, "auth_provider": True, "model_provider": True}, env["result"]["capabilities"]
+    assert env["result"]["capabilities"] == {"quota_provider": True, "auth_provider": True, "model_provider": True, "request_interceptor": True}, env["result"]["capabilities"]
 
     rc, env = rpc(lib, plugin_api, "quota.identifier")
     results.append(("quota.identifier", rc, env))

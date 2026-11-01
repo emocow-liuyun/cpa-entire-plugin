@@ -163,9 +163,10 @@ type registrationConfigField struct {
 
 // registrationCapabilities declares only the quota provider capability.
 type registrationCapabilities struct {
-	QuotaProvider bool `json:"quota_provider"`
-	AuthProvider  bool `json:"auth_provider"`
-	ModelProvider bool `json:"model_provider"`
+	QuotaProvider      bool `json:"quota_provider"`
+	AuthProvider       bool `json:"auth_provider"`
+	ModelProvider      bool `json:"model_provider"`
+	RequestInterceptor bool `json:"request_interceptor"`
 }
 
 // identifierResult is the quota.identifier result.
@@ -216,7 +217,7 @@ func buildRegistration(requested uint32) registrationResult {
 			Logo:             "",
 			ConfigFields:     registrationConfigFields(),
 		},
-		Capabilities: registrationCapabilities{QuotaProvider: true, AuthProvider: true, ModelProvider: true},
+		Capabilities: registrationCapabilities{QuotaProvider: true, AuthProvider: true, ModelProvider: true, RequestInterceptor: true},
 	}
 }
 
@@ -240,6 +241,8 @@ func handleMethod(method string, rawRequest []byte) ([]byte, *pluginError) {
 		return handleFetch(rawRequest)
 	case methodQuotaReset:
 		return handleReset(rawRequest)
+	case "request.intercept_before", "request.intercept_after":
+		return interceptEntire(rawRequest)
 	case "model.static", "model.for_auth":
 		return handleModels(method, rawRequest)
 	case methodAuthIdentifier, methodAuthParse, methodAuthLoginStart, methodAuthLoginPoll, methodAuthRefresh:
