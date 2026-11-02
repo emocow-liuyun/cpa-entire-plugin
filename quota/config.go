@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"net/http"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -32,6 +34,27 @@ type pluginConfig struct {
 	// when the stored access token is expired or the control plane answers 401.
 	// Default true.
 	AutoRenew *bool `yaml:"auto-renew"`
+
+	// ExecutionEnabled is the master switch for relaying chat requests to
+	// Entire tasks. Default false: catalogued models stay visible but refuse.
+	ExecutionEnabled bool `yaml:"execution-enabled"`
+	// CellBaseURL is the regional origin that serves the project task routes.
+	CellBaseURL string `yaml:"cell-base-url"`
+	// ProjectHost / Project address the project ("gh" + "owner").
+	ProjectHost string `yaml:"project-host"`
+	Project     string `yaml:"project"`
+	// RepositoryID is the repository a relay run is pinned to.
+	RepositoryID string `yaml:"repository-id"`
+	// EnvironmentID is the reusable sandbox environment for relay runs.
+	EnvironmentID string `yaml:"environment-id"`
+	// TrailID / ChangeID / HeadSHA pin the run target.
+	TrailID  string `yaml:"trail-id"`
+	ChangeID string `yaml:"change-id"`
+	HeadSHA  string `yaml:"head-sha"`
+	// ReserveCents is the balance that must remain untouched before a dispatch.
+	ReserveCents int64 `yaml:"reserve-cents"`
+	// RunTimeoutMS bounds one task run.
+	RunTimeoutMS int64 `yaml:"run-timeout-ms"`
 }
 
 // runtimeConfig is the normalized, validated configuration.
@@ -46,6 +69,64 @@ type runtimeConfig struct {
 	TimeoutSeconds        int
 	OrgID                 string
 	AutoRenew             *bool
+	ExecutionEnabled      bool
+	CellBaseURL           string
+	ProjectHost           string
+	Project               string
+	RepositoryID          string
+	EnvironmentID         string
+	TrailID               string
+	ChangeID              string
+	HeadSHA               string
+	ReserveCents          int64
+	RunTimeoutMS          int64
+}
+
+const (
+	// maxInstructions is the AgentCreate.instructions maxLength (characters).
+	maxInstructions = 16384
+	// defaultReserveCents keeps a buffer of real credit before any dispatch.
+	defaultReserveCents = 100
+	// defaultRunTimeoutMS bounds one relay run.
+	defaultRunTimeoutMS = 180000
+)
+
+// executionGate reports the first unmet precondition for relaying a chat request.
+func (c runtimeConfig) executionGate() *pluginError {
+	if !c.ExecutionEnabled {
+		return newPluginError(codeExecutionDisabled,
+			"Entire inference relay is disabled: set execution-enabled after configuring the project target", http.StatusServiceUnavailable)
+	}
+	missing := []string{}
+	if strings.TrimSpace(c.CellBaseURL) == "" {
+		missing = append(missing, "cell-base-url")
+	}
+	if strings.TrimSpace(c.ProjectHost) == "" || strings.TrimSpace(c.Project) == "" {
+		missing = append(missing, "project-host/project")
+	}
+	if strings.TrimSpace(c.RepositoryID) == "" {
+		missing = append(missing, "repository-id")
+	}
+	if strings.TrimSpace(c.TrailID) == "" || strings.TrimSpace(c.ChangeID) == "" {
+		missing = append(missing, "trail-id/change-id")
+	}
+	if len(missing) > 0 {
+		return newPluginError(codeExecutionDisabled,
+			"Entire inference relay target is incomplete: "+strings.Join(missing, ", "), http.StatusServiceUnavailable)
+	}
+	return nil
+}
+
+// executionTimeout returns the per-request deadline for one relayed run.
+func (c runtimeConfig) executionTimeout() time.Duration {
+	ms := c.RunTimeoutMS
+	if ms <= 0 {
+		ms = defaultRunTimeoutMS
+	}
+	if ms > 1800000 {
+		ms = 1800000
+	}
+	return time.Duration(ms) * time.Millisecond
 }
 
 const (
@@ -102,6 +183,18 @@ func parseConfig(raw []byte) (runtimeConfig, error) {
 		allowed = append([]string(nil), defaultAllowedHosts...)
 	}
 
+	reserve := parsed.ReserveCents
+	if reserve < 0 {
+		reserve = 0
+	}
+	if reserve == 0 {
+		reserve = defaultReserveCents
+	}
+	runTimeout := parsed.RunTimeoutMS
+	if runTimeout <= 0 {
+		runTimeout = defaultRunTimeoutMS
+	}
+
 	return runtimeConfig{
 		Enabled:               parsed.Enabled,
 		Priority:              parsed.Priority,
@@ -111,6 +204,17 @@ func parseConfig(raw []byte) (runtimeConfig, error) {
 		TimeoutSeconds:        timeout,
 		OrgID:                 strings.TrimSpace(parsed.OrgID),
 		AutoRenew:             parsed.AutoRenew,
+		ExecutionEnabled:      parsed.ExecutionEnabled,
+		CellBaseURL:           strings.TrimRight(strings.TrimSpace(parsed.CellBaseURL), "/"),
+		ProjectHost:           strings.TrimSpace(parsed.ProjectHost),
+		Project:               strings.TrimSpace(parsed.Project),
+		RepositoryID:          strings.TrimSpace(parsed.RepositoryID),
+		EnvironmentID:         strings.TrimSpace(parsed.EnvironmentID),
+		TrailID:               strings.TrimSpace(parsed.TrailID),
+		ChangeID:              strings.TrimSpace(parsed.ChangeID),
+		HeadSHA:               strings.TrimSpace(parsed.HeadSHA),
+		ReserveCents:          reserve,
+		RunTimeoutMS:          runTimeout,
 	}, errParse
 }
 

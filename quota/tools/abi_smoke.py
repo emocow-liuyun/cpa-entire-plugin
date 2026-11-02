@@ -159,7 +159,7 @@ def main(argv):
     )
     results.append(("plugin.register", rc, env))
     assert env["ok"], env
-    assert env["result"]["capabilities"] == {"quota_provider": True, "auth_provider": True, "model_provider": True, "request_interceptor": True}, env["result"]["capabilities"]
+    assert env["result"]["capabilities"] == {"quota_provider": True, "auth_provider": True, "model_provider": True, "executor": True, "executor_input_formats": ["chat-completions"], "executor_model_scope": "both", "executor_output_formats": ["chat-completions"]}, env["result"]["capabilities"]
 
     rc, env = rpc(lib, plugin_api, "quota.identifier")
     results.append(("quota.identifier", rc, env))
@@ -211,9 +211,15 @@ def main(argv):
     results.append(("quota.reset", rc, env))
     assert env["result"]["success"] is False, env["result"]
 
+    # The executor is registered but ships disabled: an empty payload must be
+    # refused locally, without any upstream dispatch.
     rc, env = rpc(lib, plugin_api, "executor.execute", {})
-    results.append(("executor.execute (rejected)", rc, env))
-    assert rc == 1 and env["error"]["code"] == "unknown_method", env
+    results.append(("executor.execute (disabled)", rc, env))
+    assert rc == 1 and env["error"]["code"] == "entire_execution_disabled", env
+
+    rc, env = rpc(lib, plugin_api, "executor.execute_stream", {})
+    results.append(("executor.execute_stream (refused)", rc, env))
+    assert rc == 1 and env["error"]["code"] == "entire_stream_unsupported", env
 
     # Credential hygiene: neither a host log nor an error envelope may carry the token.
     for name, _, envelope in results:

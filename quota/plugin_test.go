@@ -148,7 +148,10 @@ func TestRegisterDeclaresQuotaProviderOnly(t *testing.T) {
 	if caps["auth_provider"] != true {
 		t.Fatal("auth_provider must be declared for the Entire OAuth card")
 	}
-	for _, forbidden := range []string{"executor", "management_api", "frontend_auth_provider"} {
+	if caps["executor"] != true {
+		t.Fatalf("executor capability must be declared: %v", caps)
+	}
+	for _, forbidden := range []string{"management_api", "frontend_auth_provider"} {
 		if _, present := caps[forbidden]; present {
 			t.Fatalf("capability %q must not be declared: %v", forbidden, caps)
 		}
@@ -204,8 +207,8 @@ func TestIdentifyAndDescribe(t *testing.T) {
 // TestUnknownMethodFails ensures unknown RPCs are rejected.
 func TestUnknownMethodFails(t *testing.T) {
 	resetPluginState(t)
-	if _, errHandle := handleMethod("executor.execute", nil); errHandle == nil {
-		t.Fatal("executor.execute must not be served by a quota-only plugin")
+	if _, errHandle := handleMethod("quota.nonexistent", nil); errHandle == nil {
+		t.Fatal("an unknown quota RPC must be rejected")
 	} else if errHandle.Code != codeUnknownMethod {
 		t.Fatalf("code = %s, want %s", errHandle.Code, codeUnknownMethod)
 	}

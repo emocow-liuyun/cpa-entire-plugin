@@ -3,9 +3,9 @@
 CLIProxyAPI v8（`github.com/router-for-me/CLIProxyAPI/v8`）原生 **QuotaProvider 动态库插件**，把 Entire 的
 预付额度（credit）读取结果映射为管理端可渲染的归一化配额结构。
 
-- 只声明 `quota_provider` 一项能力：`quota.identifier` / `quota.describe` / `quota.fetch` / `quota.reset`。
-- 不注册 Executor、AuthProvider、ManagementAPI、请求/响应拦截等其他能力。
-- 不发起推理请求、不启动 Agent 任务、不修改任何上游状态，只读 `GET .../billing`。
+- 能力：`quota_provider`、`auth_provider`、`model_provider`，以及默认关闭的 `executor`。
+- 额度与认证路径只读上游；只有显式开启 `execution-enabled` 的执行器会创建并归档 Agent 任务。
+- 不注册 ManagementAPI 或前端认证扩展。
 
 ## 文件
 
@@ -261,5 +261,15 @@ curl -s -X POST -H "Authorization: Bearer $CPA_MANAGEMENT_KEY" -H 'Content-Type:
 
 ## 范围声明
 
-本目录只实现 quota provider、认证解析、额度读取与测试。没有 Executor、没有推理反代、没有管理端 UI 路由、
-没有任何写操作；`quota.reset` 固定返回 `success:false`，因为 Entire 公开契约里没有重置额度接口。
+本目录实现 quota provider、OAuth 认证、额度读取/续期，以及可选启用的推理中继执行器
+（见下节）。`quota.reset` 固定返回 `success:false`，因为 Entire 公开契约里没有重置额度接口。
+
+## 执行器（Entire 推理中继）
+
+`execution-enabled: true` 后，本插件同时注册 `executor` 能力，把 `entire/<model>` 的
+chat-completions 请求中继为一次 Entire Agent 任务，并返回标准
+`chat.completion` 结果。详细配置、额度门禁与**明确不支持的能力**见
+[../EXECUTOR.md](../EXECUTOR.md)。
+
+默认关闭；未配置项目目标或未开启时，模型目录可见但调用返回
+`entire_execution_disabled`，不会派发任何上游请求。

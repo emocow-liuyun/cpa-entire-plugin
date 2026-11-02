@@ -21,7 +21,7 @@ func handleModels(method string, raw []byte) ([]byte, *pluginError) {
 		}
 	}
 	for _, id := range entireModelIDs {
-		models = append(models, map[string]any{"ID": id, "Object": "model", "OwnedBy": "entire", "DisplayName": "Entire / " + id, "Description": "Entire Agent catalogue; inference adapter not connected", "UserDefined": true})
+		models = append(models, map[string]any{"ID": id, "Object": "model", "OwnedBy": "entire", "DisplayName": "Entire / " + id, "Description": "Relayed through an Entire agent task; no native streaming or client tool calls", "UserDefined": true})
 	}
 	return encodeOKEnvelope(map[string]any{"Provider": "entire", "Models": models}), nil
 }

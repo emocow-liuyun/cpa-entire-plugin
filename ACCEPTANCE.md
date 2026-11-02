@@ -1,4 +1,17 @@
-# 验收状态（2026-10-30）
+# 验收状态（2026-11-02 更新）
+
+## 2026-11-02 推理中继验收（新增）
+
+- `POST /v1/chat/completions`，`model=entire/claude-haiku-5-5`：HTTP 200，`application/json`，`finish_reason: stop`，正文为真实模型答案，用量透传（prompt 59268 / completion 191）。
+- `stream:true`：HTTP 400 `entire_stream_unsupported`，不派发。
+- `tools`：HTTP 400 `entire_tools_unsupported`，不派发。
+- 派单前账单门禁：未读通/零余额/低于预留/已有超额/自动充值开启/runs 暂停 → 拒绝且不创建 Agent。
+- 临时 Agent 请求后自动归档；归档 ETag 缺陷（弱 ETag 被拒）已修复并有回归测试。
+- 残留的探测 Agent 已清理，账号当前无活跃 Agent。
+- 验收细节见 [EXECUTOR.md](EXECUTOR.md)。
+
+## 历史验收（2026-10-30）
+
 
 ## 通过
 
@@ -13,10 +26,11 @@
 
 ## 未通过 / 未实现
 
-- CPA 推理执行器未连接 Entire 的项目 Agent 任务 API。
+- ~~CPA 推理执行器未连接 Entire 的项目 Agent 任务 API。~~ 已于 2026-11-02 接通并验收；仍不支持原生流式与客户端工具调用。
 - `guard` 仍为独立库，没有进入生产模型请求路径；不能据此宣称账号已自动冷却。
 - OAuth 自动刷新尚待真实轮换验收；多账号身份文件名隔离已实现，尚待多真实账号验收。
 - 配额插件中账单读取失败仅返回错误，不修改账号禁用状态，不产生付款或充值请求。
+- 零额度自动冷却仍未接入派单后的实际扣减对账；当前只有派单前门禁。
 
 ## 零额外账单的上游阻碍
 

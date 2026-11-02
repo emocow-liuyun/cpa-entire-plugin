@@ -41,6 +41,29 @@ const (
 	codeBillingUnreadable = "entire_billing_unreadable"
 	codeUnknownQuota      = "entire_quota_unknown"
 	codeResetUnsupported  = "entire_reset_unsupported"
+
+	// Execution-path refusals. Each carries an explicit HTTP status so the host
+	// surfaces a real client error instead of a fabricated success.
+	codeStreamUnsupported   = "entire_stream_unsupported"
+	codeToolsUnsupported    = "entire_tools_unsupported"
+	codeContentUnsupported  = "entire_content_unsupported"
+	codeParamsUnsupported   = "entire_params_unsupported"
+	codeModelUnsupported    = "entire_model_unsupported"
+	codeContextTooLarge     = "entire_context_too_large"
+	codeBillingUnavailable  = "entire_billing_unavailable"
+	codeBillingInsufficient = "entire_billing_insufficient"
+	codeRunFailed           = "entire_run_failed"
+	codeRunTimeout          = "entire_run_timeout"
+	codeUpstreamUnavailable = "entire_upstream_unavailable"
+	codeExecutionDisabled   = "entire_execution_disabled"
+)
+
+// Executor and request-interceptor RPC method names (sdk/pluginabi/types.go).
+const (
+	methodExecutorIdentifier    = "executor.identifier"
+	methodExecutorExecute       = "executor.execute"
+	methodExecutorExecuteStream = "executor.execute_stream"
+	methodExecutorCountTokens   = "executor.count_tokens"
 )
 
 // pluginEnvelope is the RPC envelope written back to the host.
