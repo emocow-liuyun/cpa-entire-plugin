@@ -9,7 +9,9 @@
 | CPA `/v1/chat/completions` 正常返回 | HTTP 200，`application/json` |
 | 实际答案 | `链路已通。`，`finish_reason: stop` |
 | 模型 | `claude-haiku-5-5` |
-| 用量透传 | prompt 59268 / completion 191 tokens |
+| 用量透传 | prompt / completion tokens 原样返回 |
+| 多轮上下文 | system + user + assistant + user 正确赋值，42+8=50 |
+| 回答干净度 | 修复后不再复述中继指令 |
 | 临时 Agent 自动归档 | 每次请求后归档 |
 | 单元测试 | `go test ./...`、`go vet ./...` 通过 |
 
@@ -58,5 +60,6 @@ plugins:
 
 - 每次请求创建并归档一个 Agent，延迟约 20 秒量级，不是低延迟推理通道。
 - 会话被压平成单条指令文本；多轮上下文靠客户端每轮重发完整 message 数组。
+- 指令措辞会被模型读进上下文，所以中继框架文字必须极短且不可被复述。
 - 输出若被 Entire 截断，`finish_reason` 为 `length`，但当前实现不会补全全文。
 - prompt token 计数包含缓存创建与缓存读取，与模型原始计费口径可能不同。
