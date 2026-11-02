@@ -16,7 +16,7 @@ const (
 )
 
 var (
-	secretMu     sync.RWMutex
+	secretMu      sync.RWMutex
 	secretValues = make(map[string]struct{}, 8)
 	secretOrder  []string
 )
